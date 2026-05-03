@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+#ensuring for root user
+
+if [[ $EUID -ne 0 ]]; then
+	echo "Error : Run this as root!"
+	exit 1
+fi
+
+#creating the vault
+
+mkdir -p /opt/Bashrot_vault
+echo "Vault directory completed successfully"
+
+#setting up ownership
+
+chown root: warden /opt/Bashrot_vault
+chmod 770 /opt/Bashrot_vault
+
+#setting up ACLs on the vault
+
+setfacl -m g:guards:rwx /opt/Bashrot_vault
+setfacl -m g:wardens:rwx /opt/Bashrot_vault
+setfacl -m g:bashers:--- /opt/Bashrot_vault
+echo "ACLs set on vault"
+#creating hidden subdirectory 
+
+mkdir -p /opt/Bashrot_vault/.hidden_subdir
+
+#setting up ACLs in the hidden sub-directory
+
+setfacl -m g:guards:rwx /opt/Bashrot_vault/.hidden_subdir
+setfacl -m g:wardens:rwx /opt/Bashrot_vault/.hidden_subdir
+setfacl -m g:bashers:--x /opt/Bashrot_vault/.hidden_subdir
+
+echo "secureVault setup is complete. Verifying.."
+
+#verifying ACLs
+
+getfacl /opt/Bashrot_vault
+getfacl /opt/Bashrot_vault/.hidden_subdir
