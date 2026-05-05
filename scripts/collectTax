@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+if [[ $EUID -ne 0 ]]; then
+	echo "Error: Run this as root"
+	exit 1
+fi
+
+BASHERS_DIR="/home/bashers"
+LOG_FILE="/var/log/collectTax.log"
+MAX_SIZE=5 #in MB
+
+#Creating log file if it doesn't exist
+touch "$LOG_FILE"
+chown root:wardens "$LOG_FILE"
+chmod 750 "$LOG_FILE"
+setfacl -m g:guards:rx "$LOG_FILE"
+setfacl -m g:wardens:rx "$LOG_FILE"
+
+#looping through bashers
+for basher_dir in "$BASHERS_DIR"/*/; do
+	username=$(basename "$basher_dir")
+
+	#Getting directory size in MB
+	size_mb=$(du -sm "$basher_dir" | cut -f 1)
+
+	#Checking if size exceeds 5MB
+	if [[ "$size_mb" -gt "$MAX_SIZE" ]]; then
+		echo "$username has ${size_mb}MB - applying Aura Tax!"
+
+		#Finding 3 oldest files
+		oldest_files=$(find "$basher_dir" -type f | xargs ls -t | tail -3)
+
+		#Deleting each file and logging it
+		while IFS= read -r file; do
+			file_size_kb=$(du  -sk "$file" | cut -f 1)
+			file_name=$(basename "$file")
+			timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+			rm -f "$file"
+			#Logging the deletion
+			echo "[$timestamp] | $username | $file_size_kb | $file_name" >> "$LOG_FILE"
+			echo "Deleted: $file_name (${file_size_kb}KB)"
+		done <<< "$oldest_files"
+	else
+		echo "$username is within limit (${size_mb}MB)"
+	fi
+done
+
+echo ""
+echo "collectTax complete."

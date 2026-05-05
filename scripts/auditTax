@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+LOG_FILE="/var/log/collectTax.log"
+
+#Checking the group of the user (guards or wardens)
+if ! groups | grep -qE "guards|wardens"; then
+	echo "Error: Only guards and wardens can run this script"
+	exit 1
+fi
+
+#Checking if log file exists
+if [[ ! -f "$LOG_FILE" ]]; then
+	echo "Error: Log file not found at $LOG_FILE"
+	exit 1
+fi
+
+#Checking if log file is empty
+if [[ ! -s "$LOG_FILE" ]]; then
+	echo "No tax records found yet"
+	exit 0
+fi
+
+echo "---------------------------"
+echo "AURA TAX LEADERBOARD"
+echo "---------------------------"
+
+#Using awk to sum up FILE_SIZE_IN_KB per basher
+awk -F' | ' '
+{
+	basher = $2
+	size = $3
+	total[basher] += size
+	count[basher]++
+}
+END {
+	for (basher in total)
+		printf "%-20s %d KB across %d deletions\n", basher, total[basher], count[basher]
+}
+' "$LOG_FILE" | sort -rn -k2 | nl
+echo ""
+echo "---------------------------"
