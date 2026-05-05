@@ -134,12 +134,32 @@ done
 #Handle removed users.. 
 all_current_users=$(yq ".roster.wardens[].username, .roster.guards[].username, .roster.bashers[].username" "$ROSTER")
 
-for existing_user in $(getent group bashers | cut -d : -f4 | tr ',' ' '); do
+#bashers
+for existing_user in $(getent group bashers | cut -d : -f 4 | tr ',' ' '); do
 	if ! echo "$all_current_users" | grep -q "^$existing_user$"; then
 		echo "Revoking access for removed user: $existing_user"
 		usermod -s /usr/sbin/nologin "$existing_user"
 		passwd -l "$existing_user"
 	fi
 done
+
+#guards
+for existing_user in $(getent group guards | cut -d : -f 4 | tr ',' ' '); do
+	if ! echo "$all_current_users" | grep -q "^$existing_user$"; then
+		echo "Revoking access for removed user: $existing_user"
+		usermod -s /usr/sbin/nologin "$existing_user"
+		passwd -l "$existing_user"
+	fi
+done
+
+#wardens
+for existing_user in $(getent group wardens | cut -d : -f 4 | tr ',' ' '); do
+	if ! echo "$all_current_users" | grep -q "^$existing_user$"; then
+		echo "Revoking access for removed user: $existing_user"
+		usermod -s /usr/sbin/nologin "$existing_user"
+		passwd -l "$existing_user"
+	fi
+done
+
 echo ""
 echo "initRoster complete."
