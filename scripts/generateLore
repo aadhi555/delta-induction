@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+#only root can run this
+if [[ $EUID -ne 0 ]]; then
+	echo "Error: run this as root"
+	exit 1
+fi
+
+SLANG_FILE="$(dirname "$0")/../slang.txt"
+VAULT="/opt/Bashrot_vault/.hidden_subdir"
+
+#checking if slang.txt exists
+if [[ ! -f "$SLANG_FILE" ]]; then
+	echo "Error: slang.txt not found at $SLANG_FILE"
+	exit 1
+fi
+
+#checking if vault exists
+if [[ ! -d "$VAULT" ]]; then
+	echo "Error: Vault not found at $VAULT"
+	exit 1
+fi
+
+#storing Process ID of this backgroudn process to terminate this in wipeTimeline script
+echo "generateLore started. PID: $$"
+echo $$ > /tmp/generateLore.pid
+
+#Infinite loop..
+while true; do
+	#Replacing bad words with asterisks of same length
+	cleaned=$(sed 's/skibidi/*******/g; s/ohio/****/g; s/delulu/******/g' "$SLANG_FILE")
+
+	#picking one random word from the cleaned list
+	word=$(echo "$cleaned" | shuf -n 1)
+
+	#Encoding the word using base64
+	encoded=$(echo "$word" | base64)
+
+	#Generating unique file name using timestamp
+	filename="lore_$(date +%s).txt"
+
+	#Saving encoded string to vault
+	echo "$encoded" > "$VAULT/$filename"
+	
+	echo "Saved: $filename ==> $word"
+
+	sleep 30
+done
