@@ -1,0 +1,24 @@
+roster:
+  wardens:
+    - username: "yashwant"
+      image_url: "https://picsum.photos/id/1025/200/200.jpg"
+      public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPxQ2PlaceholderKeyForWarden123456789"
+      
+  guards:
+    - username: "hawk_tuah"
+      image_url: "https://picsum.photos/id/1024/200/200.jpg"
+      public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPyR3PlaceholderKeyForGuard123456789"
+    - username: "looksmaxxer"
+      image_url: "https://picsum.photos/id/1012/200/200.jpg"
+      public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPzS4PlaceholderKeyForGuard987654321"
+
+  bashers:
+    - username: "skndash"
+      image_url: "https://picsum.photos/id/1062/200/200.jpg"
+      public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPaT5PlaceholderKeyForBasher12345678"
+    - username: "brainrot_timmy"
+      image_url: "https://picsum.photos/id/1074/200/200.jpg"
+      public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPbU6PlaceholderKeyForBasher87654321"
+    - username: "sigma_grinder"
+      image_url: "https://picsum.photos/id/1084/200/200.jpg"
+      public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPcV7PlaceholderKeyForBasher11223344"

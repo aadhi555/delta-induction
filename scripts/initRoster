@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+
+if [[ $EUID -ne 0 ]]; then
+	echo "Error : Run this as root"
+	exit 1
+fi
+
+ROSTER="$(dirname "$0")/../roster.yaml"
+
+#Creating groups if they don't exist
+
+groupadd -f wardens
+groupadd -f guards
+groupadd -f bashers
+
+#WARDENS..
+
+wardens=$(yq '.roster.wardens[].username' "$ROSTER")
+for username in $wardens; do
+	if ! id "$username" &>/dev/null; then
+		useradd -m -G wardens -s /bin/bash "$username"
+		echo "Created warden: $username"
+	else
+		echo "Warden $username already exists, updating group.."
+		usermod -aG wardens "$username"
+	fi
+
+	#injecting ssh key
+	home_dir=$(eval echo ~$username)
+	mkdir -p "$home_dir/.ssh"
+	pub_key=$(yq ".roster.wardens[] | select(.username == \"$username\") | .public_key" "$ROSTER")
+	echo "$pub_key" > "$home_dir/.ssh/authorized_keys"
+	chmod 700 "$home_dir/.ssh"
+	chmod 600 "$home_dir/.ssh/authorized_keys"
+	chown -R "$username:wardens" "$home_dir/.ssh"
+done
+
+#GUARDS..
+
+mkdir -p /home/guards
+guards=$(yq '.roster.guards[].username' "$ROSTER")
+for username in $guards; do
+	if ! id "$username" &>/dev/null; then
+		useradd -m -d "/home/guards/$username" -G guards -s /bin/bash "$username"
+		echo "Created guard: $username"
+	else
+		echo "Guard $username already exists, updating group.."
+		usermod -aG guards "$username"
+	fi
+
+	#injecting ssh key
+	mkdir -p "/home/guards/$username/.ssh"
+	pub_key=$(yq ".roster.guards[] | select(.username == \"$username\") | .public_key" "$ROSTER")
+	echo "$pub_key" > "/home/guards/$username/.ssh/authorized_keys"
+	chmod 700 "/home/guards/$username/.ssh"
+	chmod 600 "/home/guards/$username/.ssh/authorized_keys"
+	chown -R "$username:guards" "/home/guards/$username/.ssh"
+done
+
+#BASHERS..
+
+mkdir -p /home/bashers
+bashers=$(yq '.roster.bashers[].username' "$ROSTER")
+for username in $bashers; do
+	if ! id "$username" &>/dev/null; then
+		useradd -m -d "/home/bashers/$username" -G bashers -s "/bin/bash" "$username"
+		mkdir -p "/home/bashers/$username/Drop_Zone"
+		echo "Created basher: $username"
+	else
+		echo "Basher $username already exists, updating group.."
+		usermod -aG bashers "$username"
+	fi
+
+	#injecting ssh key
+	mkdir -p "/home/bashers/$username/.ssh"
+	pub_key=$(yq ".roster.bashers[] | select(.username == \"$username\") | .public_key" "$ROSTER")
+	echo "$pub_key" > "/home/bashers/$username/.ssh/authorized_keys"
+	chmod 700 "/home/bashers/$username/.ssh"
+	chmod 600 "/home/bashers/$username/.ssh/authorized_keys"
+	chown -R "$username:bashers" "/home/bashers/$username/.ssh"
+
+	#Disable password authentication for bashers
+	passwd -l "$username"
+done
+
+#Directory permissions.. (restricting bashers to only their directory)
+for username in $bashers; do
+	chmod 700 "/home/bashers/$username"
+	chown "$username:bashers" "/home/bashers/$username"
+done
+#Guards can access all basher directories
+setfacl -R -m g:guards:rx /home/bashers
+
+#ASCII avatars..
+
+generate_avatar() {
+	local username=$1
+	local image_url=$2
+	local home=$3
+	local tmp_img="/tmp/${username}_avatar.jpg"
+	curl -L -s -o "$tmp_img" "$image_url"
+    	jp2a --width=60 "$tmp_img" > "$home/.avatar.txt"
+    	rm -f "$tmp_img"
+    	echo "cat $home/.avatar.txt" >> "$home/.bashrc"
+} 
+for username in $wardens; do
+	home_dir=$(eval echo ~$username)
+	image_url=$(yq ".roster.wardens[] | select(.username == \"$username\") | .image_url" "$ROSTER")
+	generate_avatar "$username" "$image_url" "$home_dir"
+done
+
+for username in $guards; do
+	image_url=$(yq ".roster.guards[] | select(.username == \"$username\") | .image_url" "$ROSTER")
+	generate_avatar "$username" "$image_url" "/home/guards/$username"
+done
+
+for username in $bashers; do
+	image_url=$(yq ".roster.bashers[] | select(.username == \"$username\") | .image_url" "$ROSTER")
+	generate_avatar "$username" "$image_url" "/home/bashers/$username"
+done
+
+#Aliases for bashers..
+for username in $bashers; do
+	bashrc="/home/bashers/$username/.bashrc"
+	echo "" >> "$bashrc"
+	echo "# Slang aliases" >> "$bashrc"
+	echo "alias cap='clear'" >> "$bashrc"
+	echo "alias sus='ls'" >> "$bashrc"
+	echo "alias mog='tail'" >> "$bashrc"
+	echo "alias slay='pwd'" >> "$bashrc"
+	echo "alias rizz='whoami'" >> "$bashrc"
+done
+
+#Handle removed users.. 
+all_current_users=$(yq ".roster.wardens[].username, .roster.guards[].username, .roster.bashers[].username" "$ROSTER")
+
+for existing_user in $(getent group bashers | cut -d : -f4 | tr ',' ' '); do
+	if ! echo "$all_current_users" | grep -q "^$existing_user$"; then
+		echo "Revoking access for removed user: $existing_user"
+		usermod -s /usr/sbin/nologin "$existing_user"
+		passwd -l "$existing_user"
+	fi
+done
+echo ""
+echo "initRoster complete."
