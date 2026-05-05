@@ -14,7 +14,7 @@ echo "Vault directory completed successfully"
 
 #setting up ownership
 
-chown root: warden /opt/Bashrot_vault
+chown root:wardens /opt/Bashrot_vault
 chmod 770 /opt/Bashrot_vault
 
 #setting up ACLs on the vault
@@ -26,6 +26,7 @@ echo "ACLs set on vault"
 #creating hidden subdirectory 
 
 mkdir -p /opt/Bashrot_vault/.hidden_subdir
+chmod 700 /opt/Bashrot_vault/.hidden_subdir
 
 #setting up ACLs in the hidden sub-directory
 
