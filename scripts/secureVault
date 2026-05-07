@@ -3,14 +3,14 @@
 #ensuring for root user
 
 if [[ $EUID -ne 0 ]]; then
-	echo "Error : Run this as root!"
+	echo "Error: Run this as root."
 	exit 1
 fi
 
 #creating the vault
 
 mkdir -p /opt/Bashrot_vault
-echo "Vault directory completed successfully"
+echo "Vault directory created successfully"
 
 #setting up ownership
 

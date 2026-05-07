@@ -63,7 +63,7 @@ mkdir -p /home/bashers
 bashers=$(yq '.roster.bashers[].username' "$ROSTER")
 for username in $bashers; do
 	if ! id "$username" &>/dev/null; then
-		useradd -m -d "/home/bashers/$username" -G bashers -s "/bin/bash" "$username"
+		useradd -m -d "/home/bashers/$username" -G bashers -s /bin/bash "$username"
 		mkdir -p "/home/bashers/$username/Drop_Zone"
 		echo "Created basher: $username"
 	else
