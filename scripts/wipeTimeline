@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+
+if [[ $EUID -ne 0 ]]; then
+	echo "Error: Run this as root."
+	exit 1
+fi
+
+INVOKING_USER="${SUDO_USER:-$(whoami)}"
+if ! id -nG "$INVOKING_USER" | grep -qw "wardens"; then
+	echo "Error: Only wardens can run this script."
+	exit 1
+fi
+
+PID_FILE="/tmp/generateLore.pid"
+BASHERS_DIR="/home/bashers"
+VAULT="/opt/Bashrot_vault"
+
+# 1. Terminate generateLore
+
+if [[ -f "$PID_FILE" ]]; then
+	pid=$(cat "$PID_FILE")
+	if kill -0 "$pid" 2>/dev/null; then
+		kill "$pid"
+		echo "generateLore (PID $pid) terminated."
+	else
+		echo "generateLore PID $pid not running, cleaning up stale PID file."
+	fi
+	rm -f "$PID_FILE"
+else
+	echo "No PID file found. generateLore may not be running."
+fi
+
+# 2. Wipe bashers directories
+
+if [[ ! -d "$BASHERS_DIR" ]]; then
+	echo "Warning: $BASHERS_DIR not found, skipping"
+else
+	for basher_dir in "$BASHERS_DIR"/*/; do
+		[[ -d "$basher_dir" ]] || continue
+		find "$basher_dir" -mindepth 1 -delete
+		echo "Wiped: $basher_dir"
+	done
+	echo "All basher directories wiped."
+fi
+
+# 3. Wipe vault and reset ACLs
+
+if [[ ! -d "$VAULT" ]]; then
+	echo "Warning: $VAULT not found, skipping."
+else
+	#Wiping all the files inside the vault including hidden subdirectory
+	find "$VAULT" -mindepth 1 -delete
+	echo "Vault contents wiped"
+
+	#Recreating the hidden subdirectory
+	mkdir -p "$VAULT/.hidden_subdir"
+
+	#Resetting base ownership and permissions
+	chown root:wardens "$VAULT"
+	chmod 770 "$VAULT"
+	chown root:wardens "$VAULT/.hidden_subdir"
+	chmod 700 "$VAULT/.hidden_subdir"
+
+	#Resetting ACLs on vault
+	setfacl -b "$VAULT"
+	setfacl -m g:guards:rwx "$VAULT"
+	setfacl -m g:wardens:rwx "$VAULT"
+	setfacl -m g:bashers:--- "$VAULT"
+
+	#Resetting ACLs on hidden subdirectory
+	setfacl -b "$VAULT/.hidden_subdir"
+	setfacl -m g:guards:rwx "$VAULT/.hidden_subdir"
+	setfacl -m g:wardens:rwx "$VAULT/.hidden_subdir"
+	setfacl -m g:bashers:--x "$VAULT/.hidden_subdir"
+
+	echo "Vault ACLs are reset to default secure state."
+fi
+
+echo ""
+echo "wipeTimeline complete. System is ready for next round."
