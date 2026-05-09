@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+
+if [[ $EUID -ne 0 ]]; then
+	echo "Error: Run this as root."
+	exit 1
+fi
+
+INVOKING_USER="${SUDO_USER:-$(whoami)}"
+if ! id -nG "$INVOKING_USER" | grep -qw "wardens"; then
+	echo "Error: Only wardens can run this script."
+	exit 1
+fi
+
+#Tunables
+HEIST_LOG="/var/log/heist.log"
+LEADERBOARD_LOG="/var/log/trendSetters.log"
+PREV_LEADERBOARD="/var/log/trendSetters_prev.log"
+
+STREAK_MULTIPLIER=10
+CLUTCH_BONUS=50
+WINDOW_SECS=300 #5 minutes
+LOOKBACK_SECS=86400 #24 hours
+
+touch "$LEADERBOARD_LOG"
+chown root:wardens "$LEADERBOARD_LOG"
+chmod 750 "$LEADERBOARD_LOG"
+setfacl -m g:guards:rx "$LEADERBOARD_LOG"
+setfacl -m g:wardens:rwx "$LEADERBOARD_LOG"
+
+#Validate heist.log
+if [[ ! -f "$HEIST_LOG" ]]; then
+	echo "Error: $HEIST_LOG not found. Run verifyHeist first."
+	exit 1
+fi
+
+if [[ ! -s "$HEIST_LOG" ]]; then
+	echo "No heist entries found in $HEIST_LOG. No leaderboard to compute."
+	exit 0
+fi
+
+NOW=$(date +%s)
+CUTOFF=$(( NOW - LOOKBACK_SECS ))
+
+#Parse heist.log
+#Format: [YYYY-MM-DD HH:MM:SS] | basher | word | filename
+
+declare -A LAST_HEIST_EPOCH
+declare -A HEIST_TIMES
+declare -A HEIST_COUNT
+
+GLOBAL_LATEST_EPOCH=0
+GLOBAL_LATEST_BASHER=""
+
+while IFS='|' read -r ts_field basher_field _rest; do
+	ts_raw=$(echo "$ts_field" | tr -d '[]' | xargs)
+	basher=$(echo "$basher_field" | xargs)
+
+	[[ -z "$ts_raw" || -z "$basher" ]] && continue
+
+	entry_epoch=$(date -d "$ts_raw" +%s 2>/dev/null) || continue
+	(( entry_epoch < CUTOFF )) && continue
+
+	HEIST_TIMES[$basher]+="$entry_epoch " #notice the space after $entry_epoch
+	HEIST_COUNT[$basher]=$(( ${HEIST_COUNT[$basher]:-0} + 1 ))
+
+	if (( entry_epoch > ${LAST_HEIST_EPOCH[$basher]:-0} )); then
+		LAST_HEIST_EPOCH[$basher]=$entry_epoch
+	fi
+
+	if (( entry_epoch > GLOBAL_LATEST_EPOCH )); then
+		GLOBAL_LATEST_EPOCH=$entry_epoch
+		GLOBAL_LATEST_BASHER=$basher
+	fi
+done < "$HEIST_LOG"
+
+ACTIVE_COUNT=${#HEIST_COUNT[@]}
+
+if (( ACTIVE_COUNT == 0 )); then
+	echo "No active bashers in the last 24 hours."
+	exit 0
+fi
+
+#Compute scores
+
+declare -A SCORE
+declare -A BEST_WINDOW #Store here to avoid recomputing during display
+
+for basher in "${!HEIST_COUNT[@]}"; do	# ! gives all keys of associative arrays
+	
+	#Streak: best 5-minute window
+	best_window=0
+	epochs=( ${HEIST_TIMES[$basher]} )
+
+	for start_epoch in "${epochs[@]}"; do
+		window_count=0
+		end_epoch=$(( start_epoch + WINDOW_SECS ))
+		for e in "${epochs[@]}"; do
+			(( e >= start_epoch && e <= end_epoch )) && (( window_count++ ))
+		done
+		(( window_count > best_window )) && best_window=$window_count
+	done
+
+	BEST_WINDOW[$basher]=$best_window
+	streak_score=$(( best_window * STREAK_MULTIPLIER ))
+
+	#Clutch Factor
+	
+	clutch_score=0
+	[[ "$basher" == "$GLOBAL_LATEST_BASHER" ]] && clutch_score=$CLUTCH_BONUS
+
+	#Decay Factor: log(mins_since_last + 1), scaled x100
+	
+	mins_since=$(( (NOW - ${LAST_HEIST_EPOCH[$basher]}) / 60 ))
+	decay_scaled=$(awk "BEGIN { printf \"%d\", log($mins_since + 1) * 100 }")
+
+	raw=$(( (streak_score + clutch_score) * 100 - decay_scaled ))
+	(( raw < 0 )) && raw=0
+
+	SCORE[$basher]=$raw
+done
+
+#Normalize by active basher count
+declare -A NORM_SCORE
+for basher in "${!SCORE[@]}"; do
+	NORM_SCORE[$basher]=$(awk "BEGIN { printf \"%d\", ${SCORE[$basher]} / $ACTIVE_COUNT }")
+done
+
+#Sort: score desc, tie-break by last heist epoch desc
+TOP3=$(
+	for basher in "${!NORM_SCORE[@]}"; do
+		echo "${NORM_SCORE[$basher]} ${LAST_HEIST_EPOCH[$basher]:-0} $basher"
+	done | sort -rn -k1,1 -k2,2 | head -3
+)
+
+#Load previous ranks for delta
+declare -A PREV_RANK
+if [[ -f "$PREV_LEADERBOARD" ]]; then
+	while IFS= read -r line; do
+		prev_pos=$(echo "$line" | awk '{ print $2 }')
+		prev_basher=$(echo "$line" | awk '{ print $3 }')
+		PREV_RANK[$prev_basher]=$prev_pos
+	done < <(grep -E "^#RANK" "$PREV_LEADERBOARD" 2>/dev/null)
+fi
+
+#Display
+
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+echo ""
+echo "---------------------------------------"
+echo "TRENDSETTERS LEADERBOARD | $TIMESTAMP"
+echo "Active bashers: $ACTIVE_COUNT"
+echo "---------------------------------------"
+
+PREV_TMP=$(mktemp)
+echo "# trendSetters rank snapshot - $TIMESTAMP" > "$PREV_TMP"
+
+position=1
+while IFS= read -r ranked_line; do
+	[[ -z "$ranked_line" ]] && continue
+	
+	norm_score=$(echo "$ranked_line" | awk '{ print $1 }')
+	basher=$(echo      "$ranked_line" | awk '{ print $3 }')
+
+	display_score=$(awk "BEGIN { printf \"%.2f\", $norm_score / 100 }")
+	mins_since=$(( (NOW - ${LAST_HEIST_EPOCH[$basher]}) / 60 ))
+
+	clutch_label=""
+	[[ "$basher" == "$GLOBAL_LATEST_BASHER" ]] && clutch_label="    CLUTCH"
+
+	delta_str="(no prior data)"
+	if [[ -n "${PREV_RANK[$basher]+x}" ]]; then
+		diff=$(( ${PREV_RANK[$basher]} - position ))
+		if (( diff > 0 )); then
+			delta_str="delta +$diff"
+		elif (( diff < 0 )); then
+			delta_str="delta $diff"
+		else
+			delta_str="- same"
+		fi
+	fi
+	
+	case $position in
+		1) medal="🥇" ;; 2) medal="🥈" ;; 3) medal="🥉" ;;
+	esac
+
+	echo "  $medal  #$position  $basher${clutch_label}"
+	echo "       Score  : $display_score"
+	echo "       Streak : best ${BEST_WINDOW[$basher]} heist(s) in a 5-min window"
+	echo "       Last heist : ${mins_since} min ago"
+	echo "       Trend  : $delta_str"
+	echo ""
+
+	echo "[$TIMESTAMP] | RANK $position | $basher | SCORE $display_score | STREAK ${BEST_WINDOW[$basher]} | LAST ${mins_since}min ago${clutch_label}" \
+        	>> "$LEADERBOARD_LOG"
+
+	echo "#RANK $position $basher" >> "$PREV_TMP"
+
+	(( position++ ))
+done <<< "$TOP3"
+
+echo "--------------------------------"
+
+mv "$PREV_TMP" "$PREV_LEADERBOARD"
+chown root:wardens "$PREV_LEADERBOARD"
+chmod 640 "$PREV_LEADERBOARD"
+
+echo ""
+echo "Leaderboard saved to $LEADERBOARD_LOG"
