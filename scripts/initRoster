@@ -122,14 +122,24 @@ done
 #Aliases for bashers..
 for username in $bashers; do
 	bashrc="/home/bashers/$username/.bashrc"
-	echo "" >> "$bashrc"
-	echo "# Slang aliases" >> "$bashrc"
-	echo "alias cap='clear'" >> "$bashrc"
-	echo "alias sus='ls'" >> "$bashrc"
-	echo "alias mog='tail'" >> "$bashrc"
-	echo "alias slay='pwd'" >> "$bashrc"
-	echo "alias rizz='whoami'" >> "$bashrc"
+	if ! grep -q "Slang aliases" "$bashrc" 2>/dev/null; then
+		echo "" >> "$bashrc"
+		echo "# Slang aliases" >> "$bashrc"
+		echo "alias cap='clear'" >> "$bashrc"
+		echo "alias sus='ls'" >> "$bashrc"
+		echo "alias mog='tail'" >> "$bashrc"
+		echo "alias slay='pwd'" >> "$bashrc"
+		echo "alias rizz='whoami'" >> "$bashrc"
+	fi
+
+	#lPenalty hook
+	if ! grep -q "lPenalty" "$bashrc" 2>/dev/null; then
+		echo "" >> "$bashrc"
+		echo "# lPenalty hook" >> "$bashrc"
+		echo "export PROMT_COMMAND='LAST_CMD=\$(history 1 | sed \"s/^[ ]*[0-9]*[ ]*//\"); /scripts/lPenalty \"$username\" \"\$LAST_CMD\"'" >> "$bashrc"
+	fi
 done
+
 
 #Handle removed users.. 
 all_current_users=$(yq ".roster.wardens[].username, .roster.guards[].username, .roster.bashers[].username" "$ROSTER")
