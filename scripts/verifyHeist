@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+
+if [[ $EUID -ne 0 ]]; then
+	echo "Error: Run this as root."
+	exit 1
+fi
+
+#Only wardens can run this
+if ! groups | grep -qw "wardens"; then
+	echo "Error: Only wardens can run this script."
+	exit 1
+fi
+
+BASHERS_HOME="/home/bashers"
+SLANG_FILE="$(dirname "$0")/../slang.txt"
+HEIST_LOG="/var/log/heist.log"
+
+#Create heist.log if it doesn't exist
+touch "$HEIST_LOG"
+chown root:wardens "$HEIST_LOG"
+chmod 750 "$HEIST_LOG"
+setfacl -m g:guards:rx "$HEIST_LOG"
+setfacl -m g:wardens:rx "$HEIST_LOG"
+
+if [[ ! -f "$SLANG_FILE" ]]; then
+	echo "Error: slang.txt not found at $SLANG_FILE"
+	exit 1
+fi
+
+#Build list of Drop_Zone directories to watch
+DROP_ZONES=()
+for basher_dir in "$BASHERS_HOME"/*/; do
+	dz="${basher_dir}Drop_Zone"
+	if [[ -d "$dz" ]]; then
+		DROP_ZONES+=("$dz")
+	fi
+done
+
+if [[ ${#DROP_ZONES[@]} -eq 0 ]]; then
+	echo "Error: No Drop_Zone directories found under $BASHERS_HOME"
+	exit 1
+fi
+
+echo "[verifyHeist] Watching ${#DROP_ZONES[@]} Drop_Zone(s)... (Ctrl+C to stop)"
+
+inotifywait -m -e create --format '%w %f' "${DROP_ZONES[@]}" 2>/dev/null | \
+while read -r watch_dir filename; do
+	
+	filepath="${watch_dir}${filename}"
+	[[ -f "$filepath" ]] || continue
+
+	basher=$(echo "$watch_dir" | awk -F'/' '{print $4}')
+
+	content=$(tr -d '[:space:]' < "$filepath")
+
+	if [[ -z "$content" ]]; then
+		echo "[verifyHeist] Empty file dropped by $basher, skipping."
+		continue
+	fi
+
+	decoded=$(echo "$content" | base64 --decode 2>/dev/null)
+	if [[ -z "$decoded" ]]; then
+		echo "[verifyHeist] File by $basher is not valid base64, skipping."
+		continue 
+	fi
+
+	if grep -qixF "$decoded" "$SLANG_FILE"; then
+		timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+		echo "[$timestamp] | $basher successfully decoded: $decoded"
+
+		wall "[HEIST SUCCESS] $basher cracked the vault at $timestamp | Word: '$decoded' | File: $filename"
+
+		echo "[$timestamp] | $basher | $decoded | $filename" >> "$HEIST_LOG"
+	else
+		echo "[verifyHeist] $basher dropped '$decoded' - not a valid slang word."
+	fi
+done
