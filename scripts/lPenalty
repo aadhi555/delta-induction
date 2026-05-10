@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+
+#lPenalty - command penalty checker
+#Called via PROMPT_COMMAND in basher .bashrc
+#Usage: lpenaty "<username>" "<last_command>"
+
+if [[ $EUID -ne 0 ]]; then
+	echo "Error: Run this as root."
+	exit 1
+fi
+
+BASHER=$1
+COMMAND=$2
+THRESHOLD=100
+RBASH_DURATION=1800 #30 mins
+
+#Find first warden's home to log into
+WARDEN_HOME=$(getent group wardens \
+	| cut -d: -f4 \
+	| tr ',' '\n' \
+	| head -1 \
+	| xargs -I{} eval echo "~{}")
+
+PENALTY_DIR="$WARDEN_HOME/penalties"
+PENALTY_FILE="$PENALTY_DIR/${BASHER}.txt"
+SCORE_FILE="$PENALTY_DIR/${BASHER}.score"
+
+[[ -z "$BASHER" || -z "$COMMAND" ]] && exit 0
+[[ -z "$WARDEN_HOME" ]] && exit 1
+
+mkdir -p "$PENALTY_DIR"
+
+#Forbidden patterns and weights
+#Format: "weight|regex"
+PATTERNS=(
+	# Highest weight — system file deletion/modification
+	"50|rm\s+-rf\s+/"
+	"50|rm\s+.*\/etc\/"
+	"50|rm\s+.*\/bin\/"
+	"50|chmod\s+.*\/etc\/"
+	"50|chown\s+.*\/etc\/"
+	"40|mkfs\."
+	"40|dd\s+if=.*of=\/dev\/"
+
+	# High weight — privilege escalation
+	"35|sudo\s+"
+	"35|su\s+"
+	"30|passwd\s+"
+	"30|visudo"
+	"30|pkexec"
+
+	# Medium weight — snooping warden/guard directories
+	"20|ls\s+.*\/home\/wardens"
+	"20|ls\s+.*\/home\/guards"
+	"20|cat\s+.*\/home\/wardens"
+	"20|cat\s+.*\/home\/guards"
+	"15|cd\s+.*\/home\/wardens"
+	"15|cd\s+.*\/home\/guards"
+
+	# Medium weight — vault snooping
+	"20|cat\s+.*Bashrot_vault"
+	"20|ls\s+.*Bashrot_vault"
+	"15|cd\s+.*Bashrot_vault"
+	
+	# Lower weight — general reconnaissance
+	"10|find\s+\/etc"
+	"10|find\s+\/root"
+	"10|cat\s+\/etc\/passwd"
+	"10|cat\s+\/etc\/shadow"
+	"10|crontab\s+-l"
+	"5|ls\s+\/root"
+	"5|ls\s+\/etc"
+)
+
+#Check command against patterns
+matched_weight=0
+matched_pattern=""
+
+for entry in "${PATTERNS[@]}"; do
+	weight="${entry%%|*}"
+	pattern="${entry##*|}"
+	if echo "$COMMAND" | grep -qP "$pattern"; then
+		matched_weight=$weight
+		matched_pattern=$pattern
+		break
+	fi
+done
+
+#Clean command - exit silently
+[[ "$matched_weight" -eq 0 ]] && exit 0
+
+#Logging the violation
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+echo "[$TIMESTAMP] | $BASHER | WEIGHT $matched_weight | $COMMAND" >> "$PENALTY_FILE"
+echo "Penalty logged: weight $matched_weight for: $COMMAND"
+
+#Updating cumulative score
+current_score=0
+[[ -f "$SCORE_FILE" ]] && current_score=$(cat "$SCORE_FILE")
+new_score=$(( current_score + matched_weight ))
+echo "$new_score" > "$SCORE_FILE"
+
+echo "Penalty score: $new_score / $THRESHOLD"
+
+#Checking threshold
+if (( new_score >= THRESHOLD )); then
+	echo "Threshold reached! Demoting $BASHER to rbash for 30 minutes."
+
+	echo "[$TIMESTAMP] | $BASHER | DEMOTED | score $new_score >= threshold $THRESHOLD" \
+		>> "$PENALTY_FILE"
+	BASHER_HOME="/home/bashers/$BASHER"
+	ALIAS_FILE="$BASHER_HOME/.rbash_aliases"
+
+	#Extracting only this basher's aliases from their .bashrc
+	grep "^alias" "$BASHER_HOME/.bashrc" > "$ALIAS_FILE" 2>/dev/null
+
+	#On rbash login, only source the alias file
+	echo "source $ALIAS_FILE" > "$BASHER_HOME/.bash_profile"
+	chown "$BASHER:bashers" "$ALIAS_FILE" "$BASHER_HOME/.bash_profile"
+
+	#Demoting shell to rbash
+	usermod -s /bin/rbash "$BASHER"
+	
+	#Resetting score
+	echo "0" > "$SCORE_FILE"
+
+	#Reinstate after 30 minutes - try 'at', fall back to nohup
+	if command -v at &>/dev/null; then
+		echo "usermod -s /bin/bash $BASHER && echo '[$TIMESTAMP] | $BASHER | REINSTATED' >> $PENALTY_FILE" \
+			| at now + 30 minutes 2>/dev/null
+	else
+		nohup bash -c "sleep $RBASH_DURATION \
+			&& usermod -s /bin/bash '$BASHER' \
+			&& echo '[$TIMESTAMP] | $BASHER | REINSTATED' >> '$PENALTY_FILE'" \
+			>/dev/null 2>&1 &
+	fi
+fi
