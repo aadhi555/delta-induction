@@ -11,24 +11,42 @@ if ! id -nG "$INVOKING_USER" | grep -qw "wardens"; then
 	exit 1
 fi
 
-PID_FILE="/tmp/generateLore.pid"
+LORE_PID_FILE="/tmp/generateLore.pid"
+NOCAP_PID_FILE="/tmp/noCapSecurity.pid"
 BASHERS_DIR="/home/bashers"
 VAULT="/opt/Bashrot_vault"
 
-# 1. Terminate generateLore
+# 1. Terminating generateLore
 
-if [[ -f "$PID_FILE" ]]; then
-	pid=$(cat "$PID_FILE")
+if [[ -f "$LORE_PID_FILE" ]]; then
+	pid=$(cat "$LORE_PID_FILE")
 	if kill -0 "$pid" 2>/dev/null; then
 		kill "$pid"
 		echo "generateLore (PID $pid) terminated."
 	else
 		echo "generateLore PID $pid not running, cleaning up stale PID file."
 	fi
-	rm -f "$PID_FILE"
+	rm -f "$LORE_PID_FILE"
 else
 	echo "No PID file found. generateLore may not be running."
 fi
+
+# Terminating noCapSecurity
+if [[ -f "$NOCAP_PID_FILE" ]]; then
+	pid=$(cat "$NOCAP_PID_FILE")
+	if kill -0 "$pid" 2>/dev/null; then
+		kill "$pid"
+		echo "noCapSecurity (PID $pid) terminated."
+	else
+		echo "noCapSecurity PID $pid not running, cleaning up stale PID file."
+	fi
+	rm -f "NOCAP_PID_FILE"
+else
+	echo "No PID file found. noCapSecurity may not be running."
+fi
+
+# Cleaning up real file tracker
+rm -f "/tmp/noCapSecurity_realfile.txt"
 
 # 2. Wipe bashers directories
 

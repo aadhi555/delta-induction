@@ -98,11 +98,18 @@ generate_avatar() {
 	local image_url=$2
 	local home=$3
 	local tmp_img="/tmp/${username}_avatar.jpg"
+	
+	if [[ -f "$home/.avatar.txt" ]]; then
+		echo "Avatar already exists for $username, skipping."
+		return
+	fi
+
 	curl -L -s -o "$tmp_img" "$image_url"
     	jp2a --width=60 "$tmp_img" > "$home/.avatar.txt"
     	rm -f "$tmp_img"
-    	echo "cat $home/.avatar.txt" >> "$home/.bashrc"
+	echo "cat $home/.avatar.txt" >> "$home/.bashrc"
 } 
+
 for username in $wardens; do
 	home_dir=$(eval echo ~$username)
 	image_url=$(yq ".roster.wardens[] | select(.username == \"$username\") | .image_url" "$ROSTER")
@@ -136,10 +143,13 @@ for username in $bashers; do
 	if ! grep -q "lPenalty" "$bashrc" 2>/dev/null; then
 		echo "" >> "$bashrc"
 		echo "# lPenalty hook" >> "$bashrc"
-		echo "export PROMT_COMMAND='LAST_CMD=\$(history 1 | sed \"s/^[ ]*[0-9]*[ ]*//\"); /scripts/lPenalty \"$username\" \"\$LAST_CMD\"'" >> "$bashrc"
+		echo "export PROMT_COMMAND='LAST_CMD=\$(history 1 | sed \"s/^[ ]*[0-9]*[ ]*//\"); sudo /scripts/lPenalty \"$username\" \"\$LAST_CMD\"'" >> "$bashrc"
 	fi
 done
 
+# Allowing bashers to run lPenalty as root without password
+echo "ALL ALL=(root) NOPASSWD: /scripts/lPenalty" > /etc/sudoers.d/lPenalty
+chmod 440 /etc/sudoers.d/lPenalty
 
 #Handle removed users.. 
 all_current_users=$(yq ".roster.wardens[].username, .roster.guards[].username, .roster.bashers[].username" "$ROSTER")

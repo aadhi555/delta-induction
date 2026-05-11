@@ -6,7 +6,8 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 #Only wardens can run this
-if ! groups | grep -qw "wardens"; then
+INVOKING_USER="${SUDO_USER:-$(whoami)}"
+if ! id -nG "$INVOKING_USER" | grep -qw "wardens"; then
 	echo "Error: Only wardens can run this script."
 	exit 1
 fi

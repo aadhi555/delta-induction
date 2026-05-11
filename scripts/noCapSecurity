@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+
+#noCapSecurity - symlink decoy generator
+#Runs as a background service
+
+if [[ $EUID -ne 0 ]]; then
+	echo "Error: Run this as root."
+	exit 1
+fi
+
+VAULT="/opt/Bashrot_vault"
+SYMLINK_DIR="/opt/Bashrot_vault/.hidden_subdir"
+REAL_FILE_TRACKER="/tmp/noCapSecurity_realfile.txt"
+PID_FILE="/tmp/noCapSecurity.pid"
+TOTAL_SYMLINKS=6767
+ROTATION_INTERVAL=$(( 45 * 60 )) #45 minutes in seconds
+
+echo "noCapSecurity started. PID: $$"
+echo $$ > "$PID_FILE"
+
+#Helper: Find random directories
+get_random_dirs() {
+	#Finding all readable directories on the system, excluding special fs
+	find / -maxdepth 6 -type d \
+		\( -path /proc -o -path /sys -o -path /dev \) -prune \
+		-o -type d -readable -print 2>/dev/null \
+		| shuf -n "$TOTAL_SYMLINKS"
+}
+
+#Helper: Picking a random existing lore file from vault
+get_lore_file() {
+	find "$VAULT/.hidden_subdir" -maxdepth 1 -type f -name "lore_*.txt" \
+		| shuf -n 1
+}
+
+
+#Helper: find a random hidden directory
+get_random_hidden_dir() {
+	find / -maxdepth 6 \
+		\( -path /proc -o -path /sys -o -path /dev \) -prune \
+		-o -type d -name ".*" -readable -print 2>/dev/null \
+		| grep -v "^/proc\|^/sys\|^/dev" \
+		| shuf -n 1
+}
+#Main rotation function
+rotate_symlinks() {
+	echo "[$(date '+%Y-%m-%d %H:%M:%S')] Rotating symlinks..."
+
+	# 1. Cleaning up old symlinks
+	if [[ -f "$REAL_FILE_TRACKER" ]]; then
+		old_dir=$(cat "$REAL_FILE_TRACKER" | cut -d'|' -f1)
+		old_real=$(cat "$REAL_FILE_TRACKER" | cut -d'|' -f2)
+
+		#Removing old real file copy
+		[[ -f "$old_real" ]] && rm -f "$old_real"
+
+		#Removing all old symlinks
+		find "$SYMLINK_DIR" -maxdepth 1 -type l -delete
+	fi
+
+	# 2. Picking a real lore file
+	real_lore=$(get_lore_file)
+	if [[ -z "$real_lore" ]]; then
+		echo "No lore files found yet, waiting for generateLore..."
+		return
+	fi
+
+	# 3. Hiding the real file in a random hidden directory
+	hidden_dir=$(get_random_hidden_dir)
+	if [[ -z "$hidden_dir" ]]; then
+		hidden_dir="/tmp"
+	fi
+
+	real_hidden_file="$hidden_dir/.$(cat /proc/sys/kernel/random/uuid | tr -d '-')"
+	cp "$real_lore" "$real_hidden_file"
+	chmod 644 "$real_hidden_file"
+
+	# 4. Generating 6767 symlinks to random directories
+	mapfile -t random_dirs < <(get_random_dirs)
+
+	# Pick one random index for the real symlink
+	real_index=$(( RANDOM % TOTAL_SYMLINKS ))
+
+	for (( i=0; i<TOTAL_SYMLINKS; i++ )); do
+		link_name="$SYMLINK_DIR/vault_link_$(printf '%04d' $i)"
+
+		if (( i == real_index )); then
+			#This symlink points to the real hidden file
+			ln -sf "$real_hidden_file" "$link_name"
+		else
+			#All other symlinks point to random directories
+			target="${random_dirs[$i]:-/tmp}"
+			ln -sf "$target" "$link_name"
+		fi
+	done
+
+	# 5. Recording real file location
+	real_link="$SYMLINK_DIR/vault_link_$(printf '%04d' $real_index)"
+	echo "$hidden_dir|$real_hidden_file|$real_link" > "$REAL_FILE_TRACKER"
+
+	echo "[$(date '+%Y-%m-%d %H:%M:%S')] Done. Real symlink: vault_link_$(printf '%04d' $real_index)"
+}
+
+#Main loop
+while true; do
+	rotate_symlinks
+	sleep "$ROTATION_INTERVAL"
+done

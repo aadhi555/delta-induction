@@ -3,7 +3,8 @@
 LOG_FILE="/var/log/collectTax.log"
 
 #Checking the group of the user (guards or wardens)
-if ! groups | grep -qE "guards|wardens"; then
+INVOKING_USER="${SUDO_USER:-$(whoami)}"
+if ! id -nG "$INVOKING_USER" | grep -qE "guards|wardens"; then
 	echo "Error: Only guards and wardens can run this script"
 	exit 1
 fi
