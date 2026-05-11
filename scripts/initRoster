@@ -64,12 +64,15 @@ bashers=$(yq '.roster.bashers[].username' "$ROSTER")
 for username in $bashers; do
 	if ! id "$username" &>/dev/null; then
 		useradd -m -d "/home/bashers/$username" -G bashers -s /bin/bash "$username"
-		mkdir -p "/home/bashers/$username/Drop_Zone"
 		echo "Created basher: $username"
 	else
 		echo "Basher $username already exists, updating group.."
 		usermod -aG bashers "$username"
 	fi
+
+	#Always ensuring Drop_Zone exists even after wipe
+	mkdir -p "/home/bashers/$username/Drop_Zone"
+	chown "$username:bashers" "/home/bashers/$username/Drop_Zone"
 
 	#injecting ssh key
 	mkdir -p "/home/bashers/$username/.ssh"
@@ -143,7 +146,7 @@ for username in $bashers; do
 	if ! grep -q "lPenalty" "$bashrc" 2>/dev/null; then
 		echo "" >> "$bashrc"
 		echo "# lPenalty hook" >> "$bashrc"
-		echo "export PROMT_COMMAND='LAST_CMD=\$(history 1 | sed \"s/^[ ]*[0-9]*[ ]*//\"); sudo /scripts/lPenalty \"$username\" \"\$LAST_CMD\"'" >> "$bashrc"
+		echo "export PROMPT_COMMAND='LAST_CMD=\$(history 1 | sed \"s/^[ ]*[0-9]*[ ]*//\"); sudo /scripts/lPenalty \"$username\" \"\$LAST_CMD\"'" >> "$bashrc"
 	fi
 done
 

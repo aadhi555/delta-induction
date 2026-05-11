@@ -40,7 +40,7 @@ if [[ -f "$NOCAP_PID_FILE" ]]; then
 	else
 		echo "noCapSecurity PID $pid not running, cleaning up stale PID file."
 	fi
-	rm -f "NOCAP_PID_FILE"
+	rm -f "$NOCAP_PID_FILE"
 else
 	echo "No PID file found. noCapSecurity may not be running."
 fi
@@ -55,7 +55,7 @@ if [[ ! -d "$BASHERS_DIR" ]]; then
 else
 	for basher_dir in "$BASHERS_DIR"/*/; do
 		[[ -d "$basher_dir" ]] || continue
-		find "$basher_dir" -mindepth 1 -delete
+		find "$basher_dir" -mindepth 1 -type f -delete
 		echo "Wiped: $basher_dir"
 	done
 	echo "All basher directories wiped."
